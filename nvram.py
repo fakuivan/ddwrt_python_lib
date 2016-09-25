@@ -1,4 +1,5 @@
 
+from collections import OrderedDict
 import struct
 class NVRAM_Codec:
     def __init__(self, header = b'DD-WRT'):
@@ -104,31 +105,27 @@ class NVRAM_Codec:
         return encoded
 
 
-from collections import OrderedDict
-import shlex
 class NVRAM:
-    def __init__(self, paramiko_client):
-        self.client = paramiko_client
-        self.header_pty_length = len(self.get_header())
-        self.header_length = len(self.get_header(with_pty = False))
+    def __init__(self, ssh_router):
+        self.router = ssh_router
     
     def set(self, key, value):
         """Sets 'value' for 'key' on the router's nvram dictionary""" 
         if not self.is_valid_key(key):
             raise KeyError("{} is not a valid key, try removing the '='".format(repr(key)))
-        command = "nvram set {}".format(shlex.quote("{}={}".format(key, value)))
-        self.client.exec_command(command)
+        command = "nvram set {}".format(self.router.quote("{}={}".format(key, value)))
+        self.router.client.exec_command(command)
     
     def unset(self, key):
         """Unsets 'key' on the router's nvram dictionary""" 
-        command = "nvram unset {}".format(shlex.quote(key))
-        self.client.exec_command(command)
+        command = "nvram unset {}".format(self.router.quote(key))
+        self.router.client.exec_command(command)
     
     def get(self, key):
         """Returns a value for 'key' on the router's nvram dictionary""" 
-        command = "nvram get {}".format(shlex.quote(key))
-        stdout = self.client.exec_command(command)[1]
-        return stdout.read()[self.header_length:-1]
+        command = "nvram get {}".format(self.router.quote(key))
+        stdout = self.router.client.exec_command(command)[1]
+        return stdout.read()[:-1]
     
     def get_all(self):
         """Returns a dictionary representing the router's nvram dictionary""" 
@@ -139,16 +136,15 @@ class NVRAM:
         to the nvram dictionary since the last commit 
         """
         command = "nvram commit"
-        self.client.exec_command(command)
+        self.router.client.exec_command(command)
     
     def backup(self):
-        """Returns a byte array object, ready to be saved on a local file"""
-        command = "stty -onlcr \n nvram backup /dev/tty"  #the 'stty -onlcr' command should
-                                                        #be executed so the binary data
-                                                        #doesn't get mess up on the way
-                                                        #(\n gets preserved)
-        stdout = self.client.exec_command(command, get_pty = True)[1]
-        return stdout.read()[self.header_pty_length:]
+        """Returns a byte array object, ready to be decoded or saved 
+        to a local file
+        """
+        command = "nvram backup /dev/tty"
+        stdout = self.router.pipe_to_stdin(command)[1]
+        return self.router.chop_header(stdout.read())
     
     def is_valid_key(self, key):
         """Returns true if the key is not going to be misinterpreted by the 
@@ -176,9 +172,3 @@ class NVRAM:
         http://svn.dd-wrt.com/browser/src/router/rc/nvram.c#L57
         """
         return str(key).find("=") == -1
-    
-    def get_header(self, with_pty = True, command = ""):
-        """Some routers print a header when requesting a pty, this function
-        is designed to catch it, so it can be removed from the stdout later on
-        """
-        return self.client.exec_command(command, get_pty = with_pty)[1].read()

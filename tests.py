@@ -2,6 +2,7 @@ import unittest
 import paramiko
 
 from nvram import NVRAM, NVRAM_Codec
+from ssh import ddwrt_ssh
 class NVRAMTests(unittest.TestCase):
     def setUp(self):
         self.client = paramiko.client.SSHClient()
@@ -15,7 +16,7 @@ class NVRAMTests(unittest.TestCase):
         self.client.close()
         
     def test_nvram(self):
-        nvram = NVRAM(self.client)
+        nvram = NVRAM(ddwrt_ssh(self.client))
         key, value = ("!#$$$%&%>>><<<", "\n&&!!#$%&/\"")
         nvram.set(key, value)
         self.assertEqual(nvram.get(key).decode('ascii'), value)
@@ -24,7 +25,7 @@ class NVRAMTests(unittest.TestCase):
             nvram.set("====", ":V")
 
     def test_codec(self):
-        memory = NVRAM(self.client).backup()
+        memory = NVRAM(ddwrt_ssh(self.client)).backup()
         codec = NVRAM_Codec()
         decoded = codec.decode(memory)
         encoded = codec.encode(decoded)

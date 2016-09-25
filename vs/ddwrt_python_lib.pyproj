@@ -28,6 +28,9 @@
     <Compile Include="port_forwarding.py">
       <SubType>Code</SubType>
     </Compile>
+    <Compile Include="ssh.py">
+      <SubType>Code</SubType>
+    </Compile>
     <Compile Include="tests.py">
       <SubType>Code</SubType>
     </Compile>
