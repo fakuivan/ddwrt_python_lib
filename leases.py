@@ -11,10 +11,8 @@ class Lease:
     @classmethod
     def from_static_leases(cls, lease):
         details = lease.split("=", 3)
-        if len(details) == 3 or details[3] == " ":
+        if len(details) >= 3:
             return cls(*(details[:3]))
-        else:
-            raise ValueError("Expected to unpack 3 values, got {}, details = {}".format(repr(len(details)), repr(details)))
     
     def __list__(self):
         return [self.mac, self.hostname, self.ip]
@@ -32,7 +30,9 @@ class ddwrt_leases:
     def __init__(self, leases_string):
         self.leases = []
         for lease in leases_string.split(" "):
-            self.leases += [Lease.from_static_leases(lease)]
+            new_lease = Lease.from_static_leases(lease)
+            if new_lease is not None:
+                self.leases += [new_lease]
 
     @classmethod
     def from_nvram(cls, nvram, check_entries = True):
@@ -58,13 +58,6 @@ class ddwrt_leases:
                                              str(lease.hostname), 
                                              str(lease.ip))
         return formatted
-    
-    def __repr__(self):
-        prettyprint = ""
-        for lease in self.leases:
-            prettyprint += "Hostname: '{}':\nMAC Address: '{}'\nIP:          '{}'\n\n".format(
-                                                           lease.hostname, lease.mac, lease.ip)
-        return prettyprint
     
     def __len__(self):
         return len(self.leases)
