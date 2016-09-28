@@ -23,6 +23,26 @@ class NVRAMTests(unittest.TestCase):
         nvram.unset(key)
         with self.assertRaises(KeyError):
             nvram.set("====", ":V")
+    
+    def test_cache(self):
+        nvram = NVRAM(ddwrt_ssh(self.client))
+        nvram.enter_cache_mode()
+        nvram.set('key1', 'value1')
+        nvram.set('key2', 'value2')
+        nvram.set('key3', 'value3')
+        nvram.set('key4', 'value4')
+        self.assertEqual(nvram.get('key1'), b'value1')
+        nvram.unset('key1')
+        nvram.unset('daljwnd21')
+        self.assertEqual(nvram.get('key1'), b'')
+        nvram.cache.get_snapshot()
+        nvram.cache.get_changes()
+        nvram.exit_cache_mode()
+        self.assertEqual(nvram.get('key2'), b'value2')
+        self.assertEqual(nvram.get('key3'), b'value3')
+        self.assertEqual(nvram.get('key4'), b'value4')
+            
+        
 
     def test_codec(self):
         memory = NVRAM(ddwrt_ssh(self.client)).backup()

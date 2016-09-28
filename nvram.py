@@ -104,28 +104,108 @@ class NVRAM_Codec:
 
         return encoded
 
+class NVRAM_Cache:
+    class void:
+        """A dummy class used to specify a key deletion"""
+        pass
+    """This class provides an easy way to implement a dummy nvram-like 
+    interface, it can be used as a fast way of doing large modifications, 
+    dumping the resultant changes into a new nvram snapshot (ready to be 
+    encoded and uploaded as a restore) or applying a changeset instead 
+    issuing a lot of independent ssh commands.
+    """
+    def __init__(self, snapshot, key_not_found = ''):
+        """:snapshot: A dictionary representig the router's nvram
+        """
+        self.key_not_found = key_not_found.encode()
+        self.snapshot = snapshot
+        self.changeset = {}
+    
+    def get(self, key):
+        """Returns `value` for :key: on the nvram dictionary
+        :key: A key
+        """
+        if key in self.changeset:
+            if self.changeset[key] is self.void:
+                return self.key_not_found
+            else: return self.changeset[key].encode()
+        elif key in self.snapshot:
+            return self.snapshot[key]
+        else: return self.key_not_found
+    
+    def set(self, key, value):
+        """Adds `key` and `value` to the changeset
+        :key: A key
+        :value: A value
+        """
+        self.changeset[key] = value
+    
+    def unset(self, key):
+        """Queues a removal on the changeset
+        :key: A key
+        """
+        self.changeset[key] = self.void
+    
+    def get_changes(self):
+        """Returns `(sets, unsets)` where `sets` is a dictionary containing
+        { key: value, key1: value1, ... } the previously queued sets, and
+        `unsets` is a list containing [keyrem, keyrem1, ...] the queued unsets
+        """
+        sets = {}
+        unsets = []
+        self.do_for_items(lambda key, value: sets.__setitem__(key, value),
+                          lambda key: unsets.__iadd__([key]))
+        return sets, unsets
+            
+    def get_snapshot(self):
+        snapshot = self.snapshot.copy()
+        self.do_for_items(lambda key, value: snapshot.__setitem__(key, value),
+                          lambda key: snapshot.pop(key, None))
+        return snapshot
+    
+    def do_for_items(self, set_func, unset_func):
+        for key, value in self.changeset.items():
+            if value is self.void:
+                unset_func(key)
+            else:
+                set_func(key, value)
+        
+    def update_snapshot(self, snapshot):
+        """Updates the current snapshot to `snapshot`
+        """
+        self.snapshot = snapshot
 
 class NVRAM:
     def __init__(self, ssh_router):
+        self.cache_mode = False
         self.router = ssh_router
     
     def set(self, key, value):
         """Sets 'value' for 'key' on the router's nvram dictionary""" 
         if not self.is_valid_key(key):
             raise KeyError("{} is not a valid key, try removing the '='".format(repr(key)))
-        command = "nvram set {}".format(self.router.quote("{}={}".format(key, value)))
-        self.router.client.exec_command(command)
+        if self.cache_mode:
+            self.cache.set(key, value)
+        else:
+            command = "nvram set {}".format(self.router.quote("{}={}".format(key, value)))
+            self.router.client.exec_command(command)
     
     def unset(self, key):
         """Unsets 'key' on the router's nvram dictionary""" 
-        command = "nvram unset {}".format(self.router.quote(key))
-        self.router.client.exec_command(command)
+        if self.cache_mode:
+            self.cache.unset(key)
+        else:
+            command = "nvram unset {}".format(self.router.quote(key))
+            self.router.client.exec_command(command)
     
     def get(self, key):
         """Returns a value for 'key' on the router's nvram dictionary""" 
-        command = "nvram get {}".format(self.router.quote(key))
-        stdout = self.router.client.exec_command(command)[1]
-        return stdout.read()[:-1]
+        if self.cache_mode:
+            return self.cache.get(key)
+        else:
+            command = "nvram get {}".format(self.router.quote(key))
+            stdout = self.router.client.exec_command(command)[1]
+            return stdout.read()[:-1]
     
     def get_all(self):
         """Returns a dictionary representing the router's nvram dictionary""" 
@@ -145,6 +225,34 @@ class NVRAM:
         command = "nvram backup /dev/tty"
         stdout = self.router.pipe_to_stdin(command)[1]
         return self.router.chop_header(stdout.read())
+    
+    def enter_cache_mode(self, fetch_all = True):
+        """Enters cache mode (local only), while this mode is active, no 
+        commands will be submitted to the client, all changes made to 
+        the nvram dictionary will only be local, when you exit this mode 
+        all of the changes will be submitted as an nvram restore, only 
+        activate this mode if you need to make a lot of changes to be
+        worth the overhead of having to push a whole nvram restore.
+        """
+        if not self.cache_mode:
+            memory = self.get_all() if fetch_all else OrderedDict()
+            self.cache = NVRAM_Cache(memory)
+            self.cache_mode = True
+    
+    def exit_cache_mode(self, as_changeset = False):
+        """Exits cache mode, all of the changes will be submited to the 
+        client as a nvram restore or as a change set
+        """
+        if self.cache_mode:
+            command = ""
+            sets, unsets = self.cache.get_changes()
+            for key, value in sets.items():
+                command += "nvram set {}; ".format(self.router.quote("{}={}".format(key, value)))
+            for key in unsets:
+                command += "nvram unset {}; ".format(self.router.quote(key))
+            del self.cache
+            self.cache_mode = False
+            self.router.client.exec_command(command)
     
     def is_valid_key(self, key):
         """Returns true if the key is not going to be misinterpreted by the 
@@ -172,3 +280,4 @@ class NVRAM:
         http://svn.dd-wrt.com/browser/src/router/rc/nvram.c#L57
         """
         return str(key).find("=") == -1
+
